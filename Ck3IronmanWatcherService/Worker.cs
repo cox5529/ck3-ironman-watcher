@@ -9,11 +9,10 @@ namespace Ck3IronmanWatcherService
             _watcherService = watcherService;
         }
 
-        protected override Task ExecuteAsync(CancellationToken stoppingToken)
+        protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            FileWatcherService.MakeBackupDirectory();
-            _watcherService.StartWatchingSaveGameDirectory();
-            return Task.CompletedTask;
+            _watcherService.MakeBackupDirectory();
+            await _watcherService.StartWatchingSaveGameDirectory();
         }
     }
 }

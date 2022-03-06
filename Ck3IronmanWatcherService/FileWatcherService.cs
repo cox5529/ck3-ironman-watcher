@@ -2,48 +2,44 @@
 
 using System.Security.Cryptography;
 using System.IO;
+using Microsoft.Extensions.Hosting.Internal;
 
 public class FileWatcherService
 {
     private readonly ILogger<FileWatcherService> _logger;
+    private readonly IConfiguration _configuration;
+    private readonly IHostApplicationLifetime _applicationLifetime;
 
-    public FileWatcherService(ILogger<FileWatcherService> logger)
+    public FileWatcherService(ILogger<FileWatcherService> logger, IConfiguration configuration, IHostApplicationLifetime applicationLifetime)
     {
         _logger = logger;
+        _configuration = configuration;
+        _applicationLifetime = applicationLifetime;
     }
 
-    private static void ThrowExceptionIfArgumentIsNull(string? str, string argumentName)
+    private string GetCrusaderKings3Directory()
     {
-        if (string.IsNullOrEmpty(str))
-        {
-            throw new ArgumentNullException(argumentName, $"{argumentName} was null.");
-        }
-    }
+        var user = _configuration["User"];
 
-    private static string GetCrusaderKings3Directory()
-    {
-        var userDirectory = Environment.GetEnvironmentVariable("USERPROFILE");
-        ThrowExceptionIfArgumentIsNull(userDirectory, nameof(userDirectory));
-
-        var ck3Directory = Path.Combine(userDirectory, "Documents", "Paradox Interactive", "Crusader Kings III");
+        var ck3Directory = Path.Combine("C:", "Users", user, "Documents", "Paradox Interactive", "Crusader Kings III");
         return ck3Directory;
     }
 
-    private static string GetSaveGameDirectory()
+    private string GetSaveGameDirectory()
     {
         var gameDirectory = GetCrusaderKings3Directory();
         var saveDirectory = Path.Combine(gameDirectory, "save games");
         return saveDirectory;
     }
 
-    private static string GetBackupDirectory()
+    private string GetBackupDirectory()
     {
         var gameDirectory = GetCrusaderKings3Directory();
         var backupDirectory = Path.Combine(gameDirectory, "backups");
         return backupDirectory;
     }
 
-    public static void MakeBackupDirectory()
+    public void MakeBackupDirectory()
     {
         var backupDirectory = GetBackupDirectory();
         Directory.CreateDirectory(backupDirectory);
@@ -82,7 +78,7 @@ public class FileWatcherService
         return ConvertByteArrayToHexadecimal(md5.ComputeHash(stream));
     }
 
-    private static string GetPathToBackupOfSaveGame(string saveGamePath)
+    private string GetPathToBackupOfSaveGame(string saveGamePath)
     {
         var backupDirectory = GetBackupDirectory();
         var fileName = Path.GetFileName(saveGamePath);
@@ -90,7 +86,7 @@ public class FileWatcherService
         return pathToBackupFile;
     }
 
-    private static string? GetPathToMostRecentBackupOfSaveGameIfExists(string saveGamePath)
+    private string? GetPathToMostRecentBackupOfSaveGameIfExists(string saveGamePath)
     {
         var pathToBackupFile = GetPathToBackupOfSaveGame(saveGamePath);
         return File.Exists(pathToBackupFile) ? pathToBackupFile : null;
@@ -101,7 +97,7 @@ public class FileWatcherService
         return GetChecksumOfFile(pathToFileA) == GetChecksumOfFile(pathToFileB);
     }
 
-    private static bool SaveBackupAlreadyExists(string pathToSaveGame)
+    private bool SaveBackupAlreadyExists(string pathToSaveGame)
     {
         var backupPath = GetPathToMostRecentBackupOfSaveGameIfExists(pathToSaveGame);
         return !string.IsNullOrEmpty(backupPath) && AreChecksumsEqual(backupPath, pathToSaveGame);
@@ -195,11 +191,24 @@ public class FileWatcherService
         CreateSaveGameBackup(pathToSaveFile);
     }
 
-    public void StartWatchingSaveGameDirectory()
+    private async Task WaitUntilApplicationShutdown()
+    {
+        var waitForStop = new TaskCompletionSource<object>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _applicationLifetime.ApplicationStopping.Register(obj =>
+        {
+            var tcs = (TaskCompletionSource<object>)obj;
+            tcs.TrySetResult(null);
+        }, waitForStop);
+
+        await waitForStop.Task.ConfigureAwait(false);
+    }
+
+    public async Task StartWatchingSaveGameDirectory()
     {
         var saveGameDirectory = GetSaveGameDirectory();
-        using var watcher = BuildFileSystemWatcherForDirectory(saveGameDirectory);
-        _logger.LogInformation($"Watching {saveGameDirectory}. Press enter to exit.");
-        Console.ReadLine();
+        var watcher = BuildFileSystemWatcherForDirectory(saveGameDirectory);
+        _logger.LogInformation($"Watching {saveGameDirectory}.");
+
+        await WaitUntilApplicationShutdown();
     }
 }
